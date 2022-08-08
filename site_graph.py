@@ -7,6 +7,7 @@ import argparse
 import pickle
 import scipy
 import numpy as np
+import re
 
 from collections import deque
 
@@ -14,6 +15,31 @@ INTERNAL_COLOR = "#0072BB"
 EXTERNAL_COLOR = "#FF9F40"
 ERROR_COLOR = "#FF0800"
 RESOURCE_COLOR = "#2ECC71"
+BASE_COLOR = "#5DBB63"
+
+TO_IGNORE = [
+    "api",
+    "author=",
+    "github.com\/\w+$",
+    "https://napari.org/stable/plugins/index.html",
+]
+
+NO_EDGES = [
+    "https://napari.org/",
+    "https://github.com/napari/napari",
+    "https://forum.image.sc/tag/napari",
+    "https://napari.org/stable/usage.html",
+    "https://napari.zulipchat.com/",
+    "https://twitter.com/napari_imaging",
+    "https://napari.org/stable/api/index.html",
+    "http://sphinx-doc.org/",
+    "https://napari.org/stable/community/index.html",
+    "https://napari.org/stable/index.html",
+    "https://napari-hub.org/",
+    "https://napari-hub.org",
+    "https://napari.zulipchat.com/",
+    "https://napari.zulipchat.com",
+]
 
 
 def handle_error(error, error_obj, r, url, visited, error_codes):
@@ -23,7 +49,7 @@ def handle_error(error, error_obj, r, url, visited, error_codes):
     print(f"{error} ERROR while visiting {url}")
 
 
-def crawl(url, visit_external):
+def crawl(url, base_url=None, visit_external=False):
     visited = set()
     edges = set()
     resource_pages = set()
@@ -31,11 +57,16 @@ def crawl(url, visit_external):
     redirect_target_url = dict()
 
     head = requests.head(url, timeout=10)
-    site_url = head.url
+    start_url = head.url
+    if base_url is not None:
+        site_url_head = requests.head(url, timeout=10)
+        site_url = site_url_head.url
+    else:
+        site_url = start_url
     redirect_target_url[url] = site_url
 
     to_visit = deque()
-    to_visit.append((site_url, None))
+    to_visit.append((start_url, None))
 
     while to_visit:
         url, from_url = to_visit.pop()
@@ -55,12 +86,10 @@ def crawl(url, visit_external):
             continue
 
         soup = BeautifulSoup(page.text, "html.parser")
-        internal_links = set()
-        external_links = set()
 
         # Handle <base> tags
-        base_url = soup.find("base")
-        base_url = "" if base_url is None else base_url.get("href", "")
+        base_url_ = soup.find("base")
+        base_url_ = start_url if base_url_ is None else base_url_.get("href", "")
 
         for link in soup.find_all("a", href=True):
             link_url = link["href"]
@@ -68,13 +97,10 @@ def crawl(url, visit_external):
             if link_url.startswith("mailto:"):
                 continue
 
-            if "api" in link_url:
-                continue
-
             # Resolve relative paths
             if not link_url.startswith("http"):
                 link_url = urllib.parse.urljoin(
-                    url, urllib.parse.urljoin(base_url, link_url)
+                    url, urllib.parse.urljoin(base_url_, link_url)
                 )
 
             # Remove queries/fragments from internal links
@@ -86,9 +112,13 @@ def crawl(url, visit_external):
             # Load where we know that link_url will be redirected
             if link_url in redirect_target_url:
                 link_url = redirect_target_url[link_url]
+            
+            for val in TO_IGNORE:
+                if re.match(val, link_url) or link_url == val:
+                    continue
 
             if link_url not in visited and (
-                visit_external or link_url.startswith(site_url)
+                visit_external or link_url.startswith(base_url)
             ):
                 is_html = False
                 error = False
@@ -117,7 +147,8 @@ def crawl(url, visit_external):
                     else:
                         resource_pages.add(link_url)
 
-            edges.add((url, link_url))
+            if (not link_url.startswith(start_url)) and (link_url not in NO_EDGES):
+                edges.add((url, link_url))
 
     return edges, error_codes, resource_pages
 
@@ -174,13 +205,16 @@ def visualize(edges, error_codes, resource_pages, args):
     colors = []
     for node in net.nodes:
         node["size"] = 15
-        node["label"] = ""
+        node["label"] = f'{node["id"][8:]}'
         if node["id"].startswith(args.site_url):
             color = INTERNAL_COLOR
             node["color"] = INTERNAL_COLOR
             if node["id"] in resource_pages:
                 node["color"] = RESOURCE_COLOR
                 color = RESOURCE_COLOR
+        elif node["id"].startswith(args.base_url):
+            color = BASE_COLOR
+            node["color"] = BASE_COLOR
         else:
             node["color"] = EXTERNAL_COLOR
             color = EXTERNAL_COLOR
@@ -198,10 +232,10 @@ def visualize(edges, error_codes, resource_pages, args):
     net.save_graph(args.vis_file)
     nx.write_gml(G, "graph.gml")
     import matplotlib.pyplot as plt
-    limits = plt.axis("off")  # turn off axis
-    nx.draw_networkx(G, with_labels=False, pos=nx.spring_layout(G), node_color=colors, node_size=5)
-    plt.savefig("graph.png", dpi=400)
 
+    limits = plt.axis("off")  # turn off axis
+    nx.draw_networkx(G, with_labels=False, node_color=colors, node_size=5)
+    plt.savefig("graph.png", dpi=400)
 
 
 if __name__ == "__main__":
@@ -209,7 +243,18 @@ if __name__ == "__main__":
         description="Visualize the link graph of a website."
     )
     parser.add_argument(
-        "site_url", type=str, help="the base URL of the website", nargs="?", default=""
+        "site_url",
+        type=str,
+        help="where to start the website crawl",
+        nargs="?",
+        default="",
+    )
+    parser.add_argument(
+        "--base-url",
+        type=str,
+        help="the base URL of the website",
+        nargs="?",
+        default=None,
     )
     default = "site.html"
     parser.add_argument(
@@ -297,7 +342,9 @@ if __name__ == "__main__":
                 )
                 exit(1)
 
-        edges, error_codes, resource_pages = crawl(args.site_url, args.visit_external)
+        edges, error_codes, resource_pages = crawl(
+            args.site_url, args.base_url, args.visit_external
+        )
         print("Crawl complete.")
 
         with open(args.data_file, "wb") as f:

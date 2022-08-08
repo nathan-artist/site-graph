@@ -1,20 +1,18 @@
 var options = {
-  "edges": {
-    "arrows": {
-      "to": {
-        "enabled": true,
-        "scaleFactor": 0.5
-      }
+  "nodes": {
+    "font": {
+      "size": 6
     },
-    "color": {
-      "inherit": true
-    },
-    "smooth": false
+    "size": 10
   },
   "physics": {
     "barnesHut": {
-      "gravitationalConstant": -10000,
-      "springConstant": 0.003
+      "theta": 0.3,
+      "centralGravity": 0.4,
+      "springLength": 360,
+      "springConstant": 0.05,
+      "damping": 0.3,
+      "avoidOverlap": 0.4
     },
     "minVelocity": 0.75
   }

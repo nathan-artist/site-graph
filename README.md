@@ -5,6 +5,13 @@
 - [my blog post about this project](https://www.cs.cornell.edu/~kt/post/site-graph/)
 - [a live example on my website](https://www.cs.cornell.edu/~kt/graph/)
 
+## Commands
+
+```
+python site_graph.py --base-url https://napari.org/ --from-data-file crawl.pickle --width 1200 --height 950 --options options.txt
+python site_graph.py https://napari.org/stable/plugins/ --base-url https://napari.org/ --options options.txt
+```
+
 ## Dependencies
 python3
 - bs4
